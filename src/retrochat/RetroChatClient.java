@@ -14,12 +14,15 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
@@ -54,6 +57,7 @@ public class RetroChatClient {
     };
     // Shared font to give the window a retro look
     private static final Font PIXEL_FONT = new Font("Monospaced", Font.BOLD, 13);
+    private static final Pattern EMOJI_CODE = Pattern.compile(":[a-z]+:");
 
     // Keep the window parts here so other methods can update them
     private JFrame frame;
@@ -62,6 +66,7 @@ public class RetroChatClient {
     private JTextArea userList;
     private JTextField input;
     private JButton sendButton;
+    private JButton emojiButton;
     // Sends our messages to the server
     private PrintWriter out;
     // The name we chose when opening the app
@@ -153,6 +158,13 @@ public class RetroChatClient {
         bottomPanel.setBackground(NES_BLUE);
         bottomPanel.add(input, BorderLayout.CENTER);
         bottomPanel.add(sendButton, BorderLayout.EAST);
+        emojiButton = new JButton("EMOJI", PixelEmoji.SMILE);
+        emojiButton.setFont(PIXEL_FONT);
+        emojiButton.setBackground(NES_CYAN);
+        emojiButton.setForeground(INK);
+        emojiButton.setToolTipText("Add a pixel emoji to your message");
+        emojiButton.addActionListener(event -> showEmojiPicker());
+        bottomPanel.add(emojiButton, BorderLayout.WEST);
 
         // Leave a little space around the chat area
         JPanel centerPanel = new JPanel(new GridLayout(1, 1));
@@ -166,6 +178,30 @@ public class RetroChatClient {
         frame.add(bottomPanel, BorderLayout.SOUTH);
         frame.setLocationByPlatform(true);
         frame.setVisible(true);
+    }
+
+    private void showEmojiPicker() {
+        JPopupMenu picker = new JPopupMenu();
+        picker.setLayout(new GridLayout(2, 3, 4, 4));
+        picker.setBackground(NES_BLUE);
+        picker.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(NES_CYAN, 3),
+            BorderFactory.createEmptyBorder(4, 4, 4, 4)));
+        for (PixelEmoji emoji : PixelEmoji.values()) {
+            JButton choice = new JButton(emoji.code, emoji);
+            choice.setFont(PIXEL_FONT);
+            choice.setBackground(INK);
+            choice.setForeground(Color.WHITE);
+            choice.setToolTipText("Insert " + emoji.code);
+            choice.getAccessibleContext().setAccessibleName("Insert " + emoji.name().toLowerCase() + " emoji");
+            choice.addActionListener(event -> {
+                input.replaceSelection(emoji.code);
+                picker.setVisible(false);
+                input.requestFocusInWindow();
+            });
+            picker.add(choice);
+        }
+        picker.show(emojiButton, 0, -picker.getPreferredSize().height);
     }
 
     // Open a connection and start listening for replies
@@ -184,6 +220,7 @@ public class RetroChatClient {
             appendSystem("--:--", "Could not connect: " + error.getMessage());
             input.setEnabled(false);
             sendButton.setEnabled(false);
+            emojiButton.setEnabled(false);
         }
     }
 
@@ -249,10 +286,28 @@ public class RetroChatClient {
             appendSegment("> ", style(INK, false, false));
             appendSegment(time + " ", style(TIME_GRAY, true, false));
             appendSegment(sender + ": ", style(userColor(sender), false, true));
-            appendSegment(message + System.lineSeparator(), style(INK, false, false));
+            appendEmojiMessage(message);
+            appendSegment(System.lineSeparator(), style(INK, false, false));
             // Scroll down to the newest message
             transcript.setCaretPosition(transcript.getDocument().getLength());
         });
+    }
+
+    // Render known emoji while preserving ordinary text and unknown codes.
+    private void appendEmojiMessage(String message) {
+        Matcher matcher = EMOJI_CODE.matcher(message);
+        int position = 0;
+        while (matcher.find()) {
+            PixelEmoji emoji = PixelEmoji.fromCode(matcher.group());
+            if (emoji == null) continue;
+            appendSegment(message.substring(position, matcher.start()), style(INK, false, false));
+            SimpleAttributeSet attributes = style(INK, false, false);
+            StyleConstants.setIcon(attributes, emoji);
+            // Retain the readable code in the document for copying messages.
+            appendSegment(matcher.group(), attributes);
+            position = matcher.end();
+        }
+        appendSegment(message.substring(position), style(INK, false, false));
     }
 
     // Add a server notice with a purple SERVER label
